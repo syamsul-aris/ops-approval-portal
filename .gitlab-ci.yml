@@ -1,0 +1,40 @@
+image: node:22-alpine
+
+stages:
+  - quality
+  - test
+  - build
+
+cache:
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - node_modules/
+
+before_script:
+  - npm ci
+
+lint:
+  stage: quality
+  script:
+    - npm run lint
+
+typecheck:
+  stage: quality
+  script:
+    - npx tsc --noEmit
+
+unit_tests:
+  stage: test
+  script:
+    - npm test
+
+build_bundle:
+  stage: build
+  script:
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
