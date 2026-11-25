@@ -1,0 +1,149 @@
+// SCSS design tokens for WorkflowStepper
+$stepper-bg: rgba(248, 250, 252, 0.85);
+$stepper-border: rgba(15, 23, 42, 0.06);
+$color-text-primary: #0f172a;
+$color-text-muted: #94a3b8;
+$color-completed: #059669;
+$color-active: #2563eb;
+$color-active-ring: rgba(37, 90, 235, 0.16);
+$color-rejected: #e11d48;
+$color-upcoming: #e2e8f0;
+$color-upcoming-text: #64748b;
+$breakpoint-sm: 640px;
+
+@mixin badge-state($bg, $fg) {
+  background-color: $bg;
+  color: $fg;
+}
+
+@mixin respond-below($width) {
+  @media (max-width: $width) {
+    @content;
+  }
+}
+
+.workflow-stepper {
+  background-color: $stepper-bg;
+  border: 1px solid $stepper-border;
+  border-radius: 0.75rem;
+  padding: 1rem;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  &__title {
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: $color-text-muted;
+  }
+
+  &__budget {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: $color-upcoming-text;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__list {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.375rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+
+    @include respond-below($breakpoint-sm) {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+  }
+
+  &__step {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-width: 0;
+  }
+
+  &__badge {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    flex-shrink: 0;
+    @include badge-state($color-upcoming, $color-upcoming-text);
+  }
+
+  &__label {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: $color-text-muted;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__connector {
+    height: 1px;
+    flex: 1 1 0%;
+    min-width: 0.5rem;
+    background-color: $color-upcoming;
+
+    @include respond-below($breakpoint-sm) {
+      display: none;
+    }
+
+    &--active {
+      background-color: rgba(37, 99, 235, 0.45);
+    }
+  }
+
+  &__step--completed {
+    .workflow-stepper__badge {
+      @include badge-state($color-completed, #ffffff);
+    }
+    .workflow-stepper__label {
+      color: $color-text-primary;
+    }
+  }
+
+  &__step--active {
+    .workflow-stepper__badge {
+      @include badge-state($color-active, #ffffff);
+      box-shadow: 0 0 0 4px $color-active-ring;
+    }
+    .workflow-stepper__label {
+      color: $color-text-primary;
+      font-weight: 600;
+    }
+  }
+
+  &__step--rejected {
+    .workflow-stepper__badge {
+      @include badge-state($color-rejected, #ffffff);
+    }
+    .workflow-stepper__label {
+      color: $color-rejected;
+      font-weight: 600;
+    }
+  }
+
+  &__step--upcoming {
+    .workflow-stepper__badge {
+      @include badge-state($color-upcoming, $color-upcoming-text);
+    }
+  }
+}

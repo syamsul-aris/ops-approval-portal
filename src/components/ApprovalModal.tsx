@@ -7,8 +7,6 @@ import {
   Loader2,
   ArrowRight,
   ArrowLeft,
-  Check,
-  Clock,
   GitCompareArrows,
   RefreshCw,
 } from 'lucide-react';
@@ -27,6 +25,7 @@ import {
   requiresSecurityClearance,
 } from '../domain/workflowMachine';
 import { ApiError } from '../services/mockApprovalApi';
+import { WorkflowStepper } from './WorkflowStepper/WorkflowStepper';
 
 const REMARKS_MIN = 8;
 const REMARKS_MAX = 300;
@@ -231,65 +230,12 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
         <div className="p-6 flex-1 overflow-y-auto">
           {step === 1 && (
             <div className="space-y-6">
-              {/* Visual Workflow Gate Indicator */}
-              <div className="bg-slate-50/80 rounded-xl p-4 ring-1 ring-slate-900/5">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Required Workflow Path ({threeTier ? '3-Tier' : '2-Tier'})
-                  </span>
-                  <span className="text-[11px] font-medium text-slate-500 tabular-nums">
-                    RM {request.estimatedBudgetMyr.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-1.5">
-                  {gates.map((gate, idx) => (
-                    <React.Fragment key={gate.key}>
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span
-                          className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0 ${
-                            gate.state === 'rejected'
-                              ? 'bg-rose-600 text-white'
-                              : gate.state === 'completed'
-                              ? 'bg-emerald-600 text-white'
-                              : gate.state === 'current'
-                              ? 'bg-blue-600 text-white ring-4 ring-blue-100'
-                              : 'bg-slate-200 text-slate-500'
-                          }`}
-                        >
-                          {gate.state === 'rejected' ? (
-                            <X className="w-3.5 h-3.5" />
-                          ) : gate.state === 'completed' ? (
-                            <Check className="w-3.5 h-3.5" />
-                          ) : (
-                            <Clock className="w-3 h-3" />
-                          )}
-                        </span>
-                        <span
-                          className={`text-[11px] font-medium truncate ${
-                            gate.state === 'rejected'
-                              ? 'text-rose-700'
-                              : gate.state === 'completed' || gate.state === 'current'
-                              ? 'text-slate-900'
-                              : 'text-slate-400'
-                          }`}
-                        >
-                          {gate.label}
-                        </span>
-                      </div>
-                      {idx < gates.length - 1 && (
-                        <div
-                          className={`h-px flex-1 min-w-2 ${
-                            gates[idx + 1].state === 'completed' ||
-                            gates[idx + 1].state === 'current'
-                              ? 'bg-blue-300'
-                              : 'bg-slate-200'
-                          }`}
-                        />
-                      )}
-                    </React.Fragment>
-                  ))}
-                </div>
-              </div>
+              {/* Framework-agnostic SCSS/BEM WorkflowStepper */}
+              <WorkflowStepper
+                gates={gates}
+                tierLabel={`Required Workflow Path (${threeTier ? '3-Tier' : '2-Tier'})`}
+                metaLabel={`RM ${request.estimatedBudgetMyr.toLocaleString()}`}
+              />
 
               {/* Request Metadata */}
               <div className="grid grid-cols-2 gap-4 text-sm bg-white p-4 rounded-xl ring-1 ring-slate-900/5 shadow-2xs">

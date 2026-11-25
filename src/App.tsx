@@ -40,7 +40,6 @@ import { ApiError, mockApprovalApi } from './services/mockApprovalApi';
 import { exportRequestsToCsv } from './utils/exportCsv';
 
 export function App() {
-  const [currentRole, setCurrentRole] = useState<UserRole>('UNIT_REVIEWER');
   const [selectedRequest, setSelectedRequest] = useState<PersonnelRequest | null>(
     null
   );
@@ -54,6 +53,8 @@ export function App() {
   const {
     requests,
     filteredRequests,
+    currentRole,
+    setCurrentRole,
     fetchStatus,
     errorMessage,
     actionError,
@@ -73,6 +74,7 @@ export function App() {
     setDepartmentFilter,
     slaBreachedOnly,
     setSlaBreachedOnly,
+    resetAllFilters,
     filterPresets,
     saveFilterPreset,
     applyFilterPreset,
@@ -81,7 +83,6 @@ export function App() {
     sortDirection,
     toggleSort,
     activityFeed,
-    logActivity,
     undoDecision,
     reload,
     createRequest,
@@ -125,9 +126,8 @@ export function App() {
   const handleRoleChange = useCallback(
     (nextRole: UserRole) => {
       setCurrentRole(nextRole);
-      logActivity('ROLE_SWITCH', `Switched active role → ${nextRole}`);
     },
-    [logActivity]
+    [setCurrentRole]
   );
 
   const handleSelectRequest = useCallback(
@@ -246,11 +246,8 @@ export function App() {
   }, [filteredRequests, pushToast]);
 
   const handleResetFilters = useCallback(() => {
-    setSearchQuery('');
-    setStatusFilter('ALL');
-    setDepartmentFilter('ALL');
-    setSlaBreachedOnly(false);
-  }, [setSearchQuery, setStatusFilter, setDepartmentFilter, setSlaBreachedOnly]);
+    resetAllFilters();
+  }, [resetAllFilters]);
 
   const handleResetDemo = useCallback(() => {
     mockApprovalApi.resetDemoData();
@@ -266,10 +263,10 @@ export function App() {
       if (target === 'ALL') {
         setStatusFilter('ALL');
       } else {
-        setStatusFilter((prev) => (prev === target ? 'ALL' : target));
+        setStatusFilter(statusFilter === target ? 'ALL' : target);
       }
     },
-    [setStatusFilter]
+    [statusFilter, setStatusFilter]
   );
 
   const kpiCards: {
@@ -378,6 +375,14 @@ export function App() {
       {/* Main Content */}
       <ErrorBoundary>
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
+          {/* Screen-reader live region for API status updates */}
+          <div className="sr-only" aria-live="polite" aria-atomic="true">
+            {fetchStatus === 'loading'
+              ? 'Loading operational requests.'
+              : fetchStatus === 'error'
+              ? `Error loading requests: ${errorMessage ?? 'Unknown error'}`
+              : `${filteredRequests.length} operational requests displayed.`}
+          </div>
           {/* Session Expired Banner */}
           {sessionExpired && (
             <div

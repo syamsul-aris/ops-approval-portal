@@ -1,7 +1,17 @@
+import React from 'react';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { Provider } from 'react-redux';
 import { useApprovalRequests } from './useApprovalRequests';
 import { mockApprovalApi } from '../services/mockApprovalApi';
+import { createAppStore } from '../store/store';
+
+function createWrapper() {
+  const store = createAppStore();
+  return function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(Provider, { store, children });
+  };
+}
 
 describe('useApprovalRequests', () => {
   beforeEach(() => {
@@ -11,7 +21,7 @@ describe('useApprovalRequests', () => {
   });
 
   it('loads initial requests and filters by search, status, and department', async () => {
-    const { result } = renderHook(() => useApprovalRequests());
+    const { result } = renderHook(() => useApprovalRequests(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.fetchStatus).toBe('success');
@@ -48,7 +58,7 @@ describe('useApprovalRequests', () => {
       '/?status=COMMAND_APPROVED&dept=Communications&q=Encrypted'
     );
 
-    const { result } = renderHook(() => useApprovalRequests());
+    const { result } = renderHook(() => useApprovalRequests(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.fetchStatus).toBe('success');
@@ -66,7 +76,7 @@ describe('useApprovalRequests', () => {
   });
 
   it('rolls back optimistic update when simulated API error is enabled', async () => {
-    const { result } = renderHook(() => useApprovalRequests());
+    const { result } = renderHook(() => useApprovalRequests(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.fetchStatus).toBe('success');
@@ -103,7 +113,7 @@ describe('useApprovalRequests', () => {
   });
 
   it('creates a new request and prepends it to the list', async () => {
-    const { result } = renderHook(() => useApprovalRequests());
+    const { result } = renderHook(() => useApprovalRequests(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.fetchStatus).toBe('success');
@@ -129,7 +139,7 @@ describe('useApprovalRequests', () => {
   });
 
   it('silently refreshes JWT on 401 and retries the approval action', async () => {
-    const { result } = renderHook(() => useApprovalRequests());
+    const { result } = renderHook(() => useApprovalRequests(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.fetchStatus).toBe('success');
@@ -156,7 +166,7 @@ describe('useApprovalRequests', () => {
   });
 
   it('sets sessionExpired when silent token refresh fails', async () => {
-    const { result } = renderHook(() => useApprovalRequests());
+    const { result } = renderHook(() => useApprovalRequests(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.fetchStatus).toBe('success');
@@ -185,7 +195,7 @@ describe('useApprovalRequests', () => {
   });
 
   it('undoes a decision within 10 seconds and appends a REVERTED audit log', async () => {
-    const { result } = renderHook(() => useApprovalRequests());
+    const { result } = renderHook(() => useApprovalRequests(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.fetchStatus).toBe('success');
