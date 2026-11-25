@@ -1,22 +1,51 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import type {
+  ActivityEvent,
   ApprovalPayload,
   AsyncStatus,
   BatchApprovalPayload,
   CreateRequestPayload,
+  FilterPreset,
   PersonnelRequest,
   PriorityLevel,
   RequestStatus,
   SortDirection,
   SortField,
+  UserRole,
 } from '../types/approval';
 import { ApiError, mockApprovalApi } from '../services/mockApprovalApi';
+import { transitionRequestStatus } from '../domain/workflowMachine';
+import { computeSlaSnapshot } from './useSlaTracker';
+
+const PRESETS_STORAGE_KEY = 'ops-portal:filter-presets';
+
+const DEFAULT_PRESETS: FilterPreset[] = [
+  {
+    id: 'preset-pending-criticals',
+    name: 'My Pending Criticals',
+    searchQuery: '',
+    statusFilter: 'PENDING_REVIEW',
+    departmentFilter: 'ALL',
+    slaBreachedOnly: false,
+    isDefault: true,
+  },
+  {
+    id: 'preset-overdue-eng',
+    name: 'Overdue Engineering',
+    searchQuery: '',
+    statusFilter: 'ALL',
+    departmentFilter: 'Engineering',
+    slaBreachedOnly: true,
+    isDefault: true,
+  },
+];
 
 const VALID_STATUSES: ReadonlySet<string> = new Set([
   'ALL',
   'PENDING_REVIEW',
-  'VERIFIED',
-  'APPROVED',
+  'UNIT_VERIFIED',
+  'SECURITY_CLEARED',
+  'COMMAND_APPROVED',
   'REJECTED',
 ]);
 
@@ -28,14 +57,15 @@ const PRIORITY_RANK: Record<PriorityLevel, number> = {
 
 const STATUS_RANK: Record<RequestStatus, number> = {
   PENDING_REVIEW: 1,
-  VERIFIED: 2,
-  APPROVED: 3,
-  REJECTED: 4,
+  UNIT_VERIFIED: 2,
+  SECURITY_CLEARED: 3,
+  COMMAND_APPROVED: 4,
+  REJECTED: 5,
 };
 
 function readInitialFiltersFromUrl() {
   if (typeof window === 'undefined') {
-    return { q: '', status: 'ALL' as RequestStatus | 'ALL', dept: 'ALL' };
+    return { q: '', status: 'ALL' as RequestStatus | 'ALL', dept: 'ALL', sla: false };
   }
   const params = new URLSearchParams(window.location.search);
   const q = params.get('q') ?? '';
@@ -44,13 +74,27 @@ function readInitialFiltersFromUrl() {
     | RequestStatus
     | 'ALL';
   const dept = params.get('dept') ?? 'ALL';
-  return { q, status, dept };
+  const sla = params.get('sla') === 'breached';
+  return { q, status, dept, sla };
 }
 
-function nextStatusForDecision(decision: ApprovalPayload['decision']): RequestStatus {
-  if (decision === 'REJECT') return 'REJECTED';
-  if (decision === 'VERIFY') return 'VERIFIED';
-  return 'APPROVED';
+function loadStoredPresets(): FilterPreset[] {
+  if (typeof window === 'undefined') return DEFAULT_PRESETS;
+  try {
+    const raw = window.localStorage.getItem(PRESETS_STORAGE_KEY);
+    if (!raw) return DEFAULT_PRESETS;
+    const parsed = JSON.parse(raw) as FilterPreset[];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_PRESETS;
+  } catch {
+    return DEFAULT_PRESETS;
+  }
+}
+
+export interface UndoEntry {
+  id: string;
+  previousSnapshot: PersonnelRequest;
+  actorRole: UserRole;
+  expiresAt: number;
 }
 
 export function useApprovalRequests() {
@@ -61,6 +105,7 @@ export function useApprovalRequests() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [simulateError, setSimulateError] = useState<boolean>(false);
+  const [simulateConflict, setSimulateConflict] = useState<boolean>(false);
   const [isRefreshingSession, setIsRefreshingSession] = useState<boolean>(false);
   const [sessionExpired, setSessionExpired] = useState<boolean>(false);
 
@@ -70,10 +115,39 @@ export function useApprovalRequests() {
     initialFilters.status
   );
   const [departmentFilter, setDepartmentFilter] = useState<string>(initialFilters.dept);
+  const [slaBreachedOnly, setSlaBreachedOnly] = useState<boolean>(initialFilters.sla);
+
+  // Saved filter presets
+  const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() =>
+    loadStoredPresets()
+  );
 
   // Sorting states
   const [sortField, setSortField] = useState<SortField>('submittedDate');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // In-memory session activity feed & undo stack
+  const [activityFeed, setActivityFeed] = useState<ActivityEvent[]>([]);
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const [slaReferenceNowMs] = useState<number>(() => Date.now());
+
+  const logActivity = useCallback(
+    (type: ActivityEvent['type'], summary: string, detail?: string) => {
+      const entry: ActivityEvent = {
+        id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type,
+        summary,
+        detail,
+        timestamp: new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      };
+      setActivityFeed((prev) => [entry, ...prev].slice(0, 50));
+    },
+    []
+  );
 
   // Sync filters to URL query parameters without creating history entries
   useEffect(() => {
@@ -98,10 +172,16 @@ export function useApprovalRequests() {
       params.delete('dept');
     }
 
+    if (slaBreachedOnly) {
+      params.set('sla', 'breached');
+    } else {
+      params.delete('sla');
+    }
+
     const query = params.toString();
     const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
     window.history.replaceState(null, '', nextUrl);
-  }, [searchQuery, statusFilter, departmentFilter]);
+  }, [searchQuery, statusFilter, departmentFilter, slaBreachedOnly]);
 
   const handleAuthFailure = useCallback((err: unknown) => {
     if (err instanceof ApiError && err.statusCode === 401) {
@@ -115,7 +195,12 @@ export function useApprovalRequests() {
     try {
       const data = await mockApprovalApi.withTokenRefresh(
         () => mockApprovalApi.fetchRequests(simulateError),
-        setIsRefreshingSession
+        (refreshing) => {
+          setIsRefreshingSession(refreshing);
+          if (refreshing) {
+            logActivity('API_RETRY', 'Silent JWT refresh triggered (401)');
+          }
+        }
       );
       setRequests(data);
       setFetchStatus('success');
@@ -125,7 +210,7 @@ export function useApprovalRequests() {
       setFetchStatus('error');
       setErrorMessage(err instanceof Error ? err.message : 'Unknown API error');
     }
-  }, [simulateError, handleAuthFailure]);
+  }, [simulateError, handleAuthFailure, logActivity]);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,9 +244,19 @@ export function useApprovalRequests() {
       try {
         const created = await mockApprovalApi.withTokenRefresh(
           () => mockApprovalApi.createRequest(payload, simulateError),
-          setIsRefreshingSession
+          (refreshing) => {
+            setIsRefreshingSession(refreshing);
+            if (refreshing) {
+              logActivity('API_RETRY', 'Silent JWT refresh during request creation');
+            }
+          }
         );
         setRequests((prev) => [created, ...prev]);
+        logActivity(
+          'CREATE',
+          `Submitted ${created.referenceCode}`,
+          `${created.priority} · RM ${created.estimatedBudgetMyr.toLocaleString()}`
+        );
         return created;
       } catch (err) {
         handleAuthFailure(err);
@@ -170,18 +265,26 @@ export function useApprovalRequests() {
         throw err;
       }
     },
-    [simulateError, handleAuthFailure]
+    [simulateError, handleAuthFailure, logActivity]
   );
 
-  /**
-   * Optimistically applies the status transition immediately and rolls back
-   * to the previous snapshot if the API request fails.
-   */
   const submitDecision = useCallback(
-    async (payload: ApprovalPayload): Promise<void> => {
+    async (
+      payload: ApprovalPayload
+    ): Promise<{ updated: PersonnelRequest; undoId: string }> => {
       setActionError(null);
       const snapshot = requests;
-      const optimisticStatus = nextStatusForDecision(payload.decision);
+      const target = snapshot.find((r) => r.id === payload.requestId);
+      if (!target) {
+        throw new Error('Request not found in local state.');
+      }
+
+      // Enforce FSM legality at the hook/reducer boundary before optimistic update
+      const optimisticStatus = transitionRequestStatus(
+        target,
+        payload.decision,
+        payload.actorRole
+      );
 
       setRequests((prev) =>
         prev.map((req) =>
@@ -208,13 +311,48 @@ export function useApprovalRequests() {
       try {
         const updated = await mockApprovalApi.withTokenRefresh(
           () => mockApprovalApi.processApproval(payload, simulateError),
-          setIsRefreshingSession
+          (refreshing) => {
+            setIsRefreshingSession(refreshing);
+            if (refreshing) {
+              logActivity('API_RETRY', 'Silent JWT refresh & auto-retry (401)');
+            }
+          }
         );
         setRequests((prev) =>
           prev.map((req) => (req.id === updated.id ? updated : req))
         );
+
+        const undoId = `undo-${Date.now()}`;
+        const undoEntry: UndoEntry = {
+          id: undoId,
+          previousSnapshot: target,
+          actorRole: payload.actorRole,
+          expiresAt: Date.now() + 10_000,
+        };
+        setUndoStack((prev) => [undoEntry, ...prev].slice(0, 10));
+
+        logActivity(
+          'TRANSITION',
+          `${updated.referenceCode} → ${updated.status}`,
+          `${payload.actorRole} (${payload.decision})`
+        );
+
+        return { updated, undoId };
       } catch (err) {
         handleAuthFailure(err);
+        if (err instanceof ApiError && err.statusCode === 409 && err.latestRequest) {
+          // Sync latest server record into table while keeping modal open for diff/resolve
+          const latest = err.latestRequest;
+          setRequests((prev) =>
+            prev.map((req) => (req.id === latest.id ? latest : req))
+          );
+          logActivity(
+            'API_RETRY',
+            `409 Conflict detected on ${latest.referenceCode}`,
+            `Server v${latest.version} vs expected v${payload.expectedVersion}`
+          );
+          throw err;
+        }
         setRequests(snapshot);
         const msg =
           err instanceof Error
@@ -224,38 +362,77 @@ export function useApprovalRequests() {
         throw err;
       }
     },
-    [requests, simulateError, handleAuthFailure]
+    [requests, simulateError, handleAuthFailure, logActivity]
   );
 
-  /**
-   * Optimistically applies batch approval/verification/rejection and rolls back on failure.
-   */
+  const undoDecision = useCallback(
+    async (undoId: string): Promise<PersonnelRequest | null> => {
+      const entry = undoStack.find((u) => u.id === undoId);
+      if (!entry || Date.now() > entry.expiresAt) {
+        return null;
+      }
+
+      const reverted = await mockApprovalApi.revertDecision(
+        entry.previousSnapshot.id,
+        entry.previousSnapshot,
+        entry.actorRole
+      );
+      setRequests((prev) =>
+        prev.map((req) => (req.id === reverted.id ? reverted : req))
+      );
+      setUndoStack((prev) => prev.filter((u) => u.id !== undoId));
+      logActivity(
+        'UNDO',
+        `Reverted ${reverted.referenceCode} → ${reverted.status}`,
+        '10-second undo applied'
+      );
+      return reverted;
+    },
+    [undoStack, logActivity]
+  );
+
   const submitBatchDecision = useCallback(
     async (payload: BatchApprovalPayload): Promise<PersonnelRequest[]> => {
       setActionError(null);
       const snapshot = requests;
-      const optimisticStatus = nextStatusForDecision(payload.decision);
       const idSet = new Set(payload.requestIds);
 
+      // Validate every selected request against the FSM before optimistic update
+      const optimisticById = new Map<string, RequestStatus>();
+      for (const req of snapshot) {
+        if (idSet.has(req.id)) {
+          optimisticById.set(
+            req.id,
+            transitionRequestStatus(req, payload.decision, payload.actorRole)
+          );
+        }
+      }
+
       setRequests((prev) =>
-        prev.map((req) =>
-          idSet.has(req.id)
-            ? {
-                ...req,
-                status: optimisticStatus,
-              }
-            : req
-        )
+        prev.map((req) => {
+          const next = optimisticById.get(req.id);
+          return next ? { ...req, status: next } : req;
+        })
       );
 
       try {
         const updatedList = await mockApprovalApi.withTokenRefresh(
           () => mockApprovalApi.processBatchApproval(payload, simulateError),
-          setIsRefreshingSession
+          (refreshing) => {
+            setIsRefreshingSession(refreshing);
+            if (refreshing) {
+              logActivity('API_RETRY', 'Silent JWT refresh during batch action');
+            }
+          }
         );
         const updatedById = new Map(updatedList.map((u) => [u.id, u]));
         setRequests((prev) =>
           prev.map((req) => updatedById.get(req.id) ?? req)
+        );
+        logActivity(
+          'TRANSITION',
+          `Batch ${payload.decision} (${updatedList.length} items)`,
+          payload.actorRole
         );
         return updatedList;
       } catch (err) {
@@ -269,15 +446,16 @@ export function useApprovalRequests() {
         throw err;
       }
     },
-    [requests, simulateError, handleAuthFailure]
+    [requests, simulateError, handleAuthFailure, logActivity]
   );
 
   const reauthenticateSession = useCallback(() => {
     mockApprovalApi.clearSessionExpiry();
     setSessionExpired(false);
     setActionError(null);
+    logActivity('API_RETRY', 'Session re-authenticated');
     loadRequests();
-  }, [loadRequests]);
+  }, [loadRequests, logActivity]);
 
   const toggleSort = useCallback(
     (field: SortField) => {
@@ -291,8 +469,53 @@ export function useApprovalRequests() {
     [sortField]
   );
 
+  const saveFilterPreset = useCallback(
+    (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const preset: FilterPreset = {
+        id: `preset-${Date.now()}`,
+        name: trimmed,
+        searchQuery,
+        statusFilter,
+        departmentFilter,
+        slaBreachedOnly,
+      };
+      setFilterPresets((prev) => {
+        const next = [...prev, preset];
+        try {
+          window.localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore storage quota errors
+        }
+        return next;
+      });
+    },
+    [searchQuery, statusFilter, departmentFilter, slaBreachedOnly]
+  );
+
+  const applyFilterPreset = useCallback((preset: FilterPreset) => {
+    setSearchQuery(preset.searchQuery);
+    setStatusFilter(preset.statusFilter);
+    setDepartmentFilter(preset.departmentFilter);
+    setSlaBreachedOnly(Boolean(preset.slaBreachedOnly));
+  }, []);
+
+  const deleteFilterPreset = useCallback((id: string) => {
+    setFilterPresets((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      try {
+        window.localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
   const filteredRequests = useMemo(() => {
     const query = searchQuery.toLowerCase();
+
     const filtered = requests.filter((item) => {
       const matchesSearch =
         item.title.toLowerCase().includes(query) ||
@@ -305,7 +528,11 @@ export function useApprovalRequests() {
       const matchesDept =
         departmentFilter === 'ALL' || item.department === departmentFilter;
 
-      return matchesSearch && matchesStatus && matchesDept;
+      const matchesSla =
+        !slaBreachedOnly ||
+        computeSlaSnapshot(item, slaReferenceNowMs).health === 'BREACHED';
+
+      return matchesSearch && matchesStatus && matchesDept && matchesSla;
     });
 
     return [...filtered].sort((a, b) => {
@@ -324,6 +551,8 @@ export function useApprovalRequests() {
     searchQuery,
     statusFilter,
     departmentFilter,
+    slaBreachedOnly,
+    slaReferenceNowMs,
     sortField,
     sortDirection,
   ]);
@@ -337,6 +566,8 @@ export function useApprovalRequests() {
     clearActionError: () => setActionError(null),
     simulateError,
     setSimulateError,
+    simulateConflict,
+    setSimulateConflict,
     isRefreshingSession,
     sessionExpired,
     reauthenticateSession,
@@ -346,9 +577,18 @@ export function useApprovalRequests() {
     setStatusFilter,
     departmentFilter,
     setDepartmentFilter,
+    slaBreachedOnly,
+    setSlaBreachedOnly,
+    filterPresets,
+    saveFilterPreset,
+    applyFilterPreset,
+    deleteFilterPreset,
     sortField,
     sortDirection,
     toggleSort,
+    activityFeed,
+    logActivity,
+    undoDecision,
     reload: loadRequests,
     createRequest,
     submitDecision,

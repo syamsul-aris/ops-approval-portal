@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info, X, RotateCcw } from 'lucide-react';
 import type { ToastMessage } from '../types/approval';
 
 interface ToastContainerProps {
@@ -45,6 +45,19 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
               <p className="font-semibold">{toast.title}</p>
               {toast.description && (
                 <p className="opacity-85 mt-0.5 break-words">{toast.description}</p>
+              )}
+              {toast.action && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    toast.action?.onClick();
+                    onDismiss(toast.id);
+                  }}
+                  className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/15 hover:bg-white/25 text-white font-semibold active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  {toast.action.label}
+                </button>
               )}
             </div>
             <button
