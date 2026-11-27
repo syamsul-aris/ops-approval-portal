@@ -483,8 +483,8 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 bg-slate-50/80 border-t border-slate-200/80 flex items-center justify-between shrink-0">
+        {/* Footer (extra bottom clearance avoids Netlify's bottom-right badge) */}
+        <div className="px-6 pt-4 pb-14 bg-slate-50/80 border-t border-slate-200/80 flex items-center justify-between shrink-0">
           {step > 1 ? (
             <button
               type="button"
