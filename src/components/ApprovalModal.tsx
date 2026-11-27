@@ -161,7 +161,7 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-slate-900/35 backdrop-blur-xs transition-opacity"
+      className="fixed inset-0 z-[9999] flex justify-end bg-slate-900/35 backdrop-blur-xs transition-opacity"
       role="dialog"
       aria-modal="true"
       aria-labelledby="approval-modal-title"

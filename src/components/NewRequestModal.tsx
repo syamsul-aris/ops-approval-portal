@@ -91,7 +91,7 @@ export const NewRequestModal: React.FC<NewRequestModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 backdrop-blur-xs p-4"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/45 backdrop-blur-xs p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="new-request-title"

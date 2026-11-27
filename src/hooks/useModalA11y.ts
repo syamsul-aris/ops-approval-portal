@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -17,6 +17,11 @@ export function useModalA11y(
   containerRef: RefObject<HTMLElement | null>,
   onClose: () => void
 ) {
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const container = containerRef.current;
@@ -35,7 +40,7 @@ export function useModalA11y(
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -65,5 +70,5 @@ export function useModalA11y(
       document.removeEventListener('keydown', handleKeyDown);
       previouslyFocused?.focus?.();
     };
-  }, [containerRef, onClose]);
+  }, [containerRef]);
 }

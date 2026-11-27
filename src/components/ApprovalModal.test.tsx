@@ -176,4 +176,32 @@ describe('ApprovalModal', () => {
     expect(screen.getByRole('button', { name: /Reload Latest Version/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Force Override/i })).toBeInTheDocument();
   });
+
+  it('preserves focus on remarks textarea when parent re-renders with a new onClose callback', () => {
+    const { rerender } = render(
+      <ApprovalModal
+        request={baseRequest}
+        currentRole="UNIT_REVIEWER"
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Proceed to Review/i }));
+    const textarea = screen.getByPlaceholderText(/Enter verification notes/i);
+    textarea.focus();
+    expect(document.activeElement).toBe(textarea);
+
+    // Simulate 1-second SLA clock re-render in App passing a new inline onClose
+    rerender(
+      <ApprovalModal
+        request={baseRequest}
+        currentRole="UNIT_REVIEWER"
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(document.activeElement).toBe(textarea);
+  });
 });
